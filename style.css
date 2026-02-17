@@ -1,0 +1,135 @@
+*body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    padding: 20px;
+    background: #f4f1ea;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: auto;
+  }
+
+  .report-title {
+    text-align: center;
+    background: #d9a679;
+    color: black;
+    padding: 12px;
+    font-weight: bold;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    letter-spacing: 1px;
+  }
+
+  .header-box {
+    background: #fbe5d6;
+    padding: 15px;
+    border-radius: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+  }
+
+  input, button {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #c8b6a6;
+    font-size: 14px;
+  }
+
+  input:focus {
+    outline: none;
+    border-color: #a86d3a;
+    box-shadow: 0 0 5px rgba(168,109,58,0.3);
+  }
+
+  button {
+    background: #a86d3a;
+    color: white;
+    font-weight: 600;
+    transition: 0.3s ease;
+  }
+
+  button:hover {
+    background: #7b4f28;
+  }
+
+  #stopBtn {
+    background: #c0392b !important;
+  }
+
+  #skipBtn {
+    background: #b03a2e !important;
+  }
+
+  #prevBtn {
+    background: #6c757d !important;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  th {
+    background: #e6b98c;
+    color: black;
+    font-weight: bold;
+    padding: 10px;
+  }
+
+  td {
+    padding: 8px;
+  }
+
+  tr:nth-child(even) {
+    background: #f9f3ec;
+  }
+
+  tr:hover {
+    background: #f1e0cf;
+  }
+
+  .timer {
+    position: fixed;
+    top: 15px;
+    right: 20px;
+    background: black;
+    color: #00ff66;
+    padding: 10px 15px;
+    font-size: 22px;
+    border-radius: 6px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+  }
+
+  .box {
+    border: 1px solid #d5c3b0;
+    padding: 15px;
+    margin-top: 20px;
+    background: #fffaf4;
+    border-radius: 8px;
+  }
+
+  h3 {
+    color: #7b4f28;
+    font-weight: bold;
+  }
+
+  .footer-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .footer-actions button {
+    flex: 1;
+  }
+
+  .value {
+    color: rgb(13, 14, 13);
+    font-weight: bold;
+}

@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Capacity Study</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Excel -->
+ <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+
+  <script src="https://cdn.jsdelivr.net/npm/exceljs/dist/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js"></script>
+
+
+  <style>
+    body { font-family: Arial; padding: 10px; }
+    button, input { padding: 10px; margin: 5px 0; width: 100%; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
+    .timer {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: black;
+      color: lime;
+      padding: 10px;
+      font-size: 20px;
+    }
+    .box { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
+    
+  </style>
+</head>
+
+<body>
+<div class="container">
+    <h2 class="report-title">CAPACITY STUDY</h2>
+
+<!-- HEADER INPUTS -->
+<div class="header-box">
+  <input type="text" id="style" placeholder="Style No" required>
+  <input type="text" id="buyer" placeholder="Buyer Name">
+  <input type="text" id="line" placeholder="Line Name">
+  <input type="date" id="date">
+  <input type="number" id="userTargetHr" placeholder="Enter Target per Hour">
+  <input type="number" id="dailyTarget" placeholder="Enter Target per Day">
+
+</div>
+
+<input type="file" id="upload" accept=".xlsx">
+
+<div class="timer" id="timer">0.00</div>
+
+<h3 id="opInfo"></h3>
+
+
+<button id="startBtn" onclick="startTimer()">START</button>
+<button id="pauseBtn" onclick="pauseTimer()">PAUSE</button>
+<button id="lapBtn" onclick="lapTimer()">LAP</button>
+<button id="stopBtn" onclick="stopTimer()" style="display:none;background:red;color:white;">
+  STOP
+</button>
+<button id="skipBtn" onclick="skipOperation()" style="background:#dc3545;color:white;">
+  SKIP OPERATION
+</button>
+<input type="text" id="remark" placeholder="Enter Remark (optional)">
+<button id="prevBtn" onclick="previousOperation()" style="background:#6c757d;color:white;">
+  PREVIOUS OPERATION
+</button>
+<table>
+<thead>
+<tr>
+  <th>Select</th>
+  <th>Cycle No</th>
+  <th>Time (sec)</th>
+</tr>
+</thead>
+<tbody id="cycleBody"></tbody>
+</table>
+
+<h3>Average Time: <span id="avgTime">0.00</span> sec</h3>
+<div class="footer-actions">
+
+ <button onclick="nextOperation()">NEXT OPERATION</button>
+ <button onclick="exportExcel()">EXPORT EXCEL</button>
+ 
+
+
+</div>
+<!-- ===== CHART SECTION ===== -->
+
+<div class="box">
+  <h3>CAPACITY CHART</h3>
+  <canvas id="capacityChart" width="800" height="400"></canvas>
+</div>
+
+<div class="box">
+  <h3>TAKT TIME CHART</h3>
+  <canvas id="taktChart" width="800" height="400"></canvas>
+</div>
+
+</div>  
+
+<script>
+let operations = [];
+let currentIndex = 0;
+let cycles = [];
+let finalData = [];
+let capacityChart = null;
+let taktChart = null;
+
+Chart.register(ChartDataLabels);
+
+
+/* ========= STEP-B : CHART → IMAGE ========= */
+function getChartImage(chartId) {
+  const canvas = document.getElementById(chartId);
+  if (!canvas) return null;
+  return canvas.toDataURL("image/png");
+}
+
+/* ---------- DEFAULT DATE ---------- */
+document.getElementById("date").value =
+  new Date().toISOString().split("T")[0];
+
+/* ---------- LOAD EXCEL ---------- */
+document.getElementById("upload").addEventListener("change", e => {
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const wb = XLSX.read(evt.target.result, { type: "binary" });
+    operations = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    loadOperation();
+  };
+  reader.readAsBinaryString(e.target.files[0]);
+});
+
+/* ---------- LOAD OPERATION ---------- */
+function loadOperation() {
+  cycles = [];
+  document.getElementById("cycleBody").innerHTML = "";
+  document.getElementById("avgTime").innerText = "0.00";
+
+  const op = operations[currentIndex];
+ document.getElementById("opInfo").innerHTML = `
+  <span class="title sno">S.NO:</span> 
+  <span class="value">${currentIndex + 1}</span> |
+
+  <span class="title token">Token Number:</span> 
+  <span class="value">${op["Token Number"] || "-"}</span> |
+
+  <span class="title operator">Operator Name:</span> 
+  <span class="value">${op["Operator Name"] || op["Operator"] || "-"}</span> |
+
+  <span class="title operation">Operation Name:</span> 
+  <span class="value">${op["Operation Name"] || op["Operation"] || "-"}</span> |
+
+  <span class="title machine">Machine:</span> 
+  <span class="value">${op["Machine"] || "-"}</span> |
+
+  <span class="title sam">SAM:</span> 
+  <span class="value">${op["LD SAM"] || "-"}</span>
+`;
+
+
+
+  clearInterval(interval);
+  interval = null;
+  elapsedMs = 0;
+  startTime = 0;
+  document.getElementById("timer").innerText = "0.00";
+  document.getElementById("stopBtn").style.display = "none";
+  document.getElementById("remark").value = "";
+  document.getElementById("prevBtn").disabled = currentIndex === 0;
+}
+
+
+/* ---------- TIMER (STOPWATCH – CORRECT) ---------- */
+let startTime = 0;
+let interval = null;
+let elapsedMs = 0;
+
+/* ---------- START ---------- */
+function startTimer() {
+  if (interval) return;
+
+  startTime = Date.now() - elapsedMs;
+
+  interval = setInterval(() => {
+    elapsedMs = Date.now() - startTime;
+    document.getElementById("timer").innerText =
+      (elapsedMs / 1000).toFixed(2);
+  }, 50);
+}
+
+/* ---------- PAUSE ---------- */
+function pauseTimer() {
+  if (!interval) return;
+
+  clearInterval(interval);
+  interval = null;
+}
+
+function lapTimer() {
+  if (!interval) return;
+
+  // Save lap (NO LIMIT)
+  cycles.push({
+    time: parseFloat((elapsedMs / 1000).toFixed(2)),
+    selected: true
+  });
+
+  renderCycles();
+
+  // 🔥 Minimum 5 cycles aana STOP kaattanum
+  if (cycles.length >= 5) {
+    document.getElementById("stopBtn").style.display = "block";
+  }
+
+  // Reset lap timer
+  elapsedMs = 0;
+  startTime = Date.now();
+}
+
+
+
+/* ---------- STOP ---------- */
+function stopTimer() {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+  }
+}
+
+/* ---------- RENDER CYCLES ---------- */
+function renderCycles() {
+  const tbody = document.getElementById("cycleBody");
+  tbody.innerHTML = "";
+
+  cycles.forEach((c, i) => {
+    const row = tbody.insertRow();
+    row.innerHTML = `
+      <td><input type="checkbox" checked onchange="toggleCycle(${i}, this.checked)"></td>
+      <td>${i + 1}</td>
+      <td>${c.time.toFixed(2)}</td>
+    `;
+  });
+
+  calculateAverage();
+}
+
+function toggleCycle(i, val) {
+  cycles[i].selected = val;
+  calculateAverage();
+}
+
+/* ---------- AVERAGE ---------- */
+function calculateAverage() {
+  const selected = cycles.filter(c => c.selected);
+  if (selected.length === 0) {
+    document.getElementById("avgTime").innerText = "0.00";
+    return;
+  }
+
+  const avg = selected.reduce((a, b) => a + b.time, 0) / selected.length;
+  document.getElementById("avgTime").innerText = avg.toFixed(2);
+}
+
+function saveCurrentOperation() {
+  if (!cycles.length && !document.getElementById("remark").value) return;
+
+  const op = operations[currentIndex];
+  const sno = currentIndex + 1;
+
+  let avgSec = parseFloat(document.getElementById("avgTime").innerText) || 0;
+
+  let basicSAM = avgSec / 60;
+  let allowanceSAM = basicSAM * 1.15;
+
+  let operatorTargetHr = 60/allowanceSAM;
+  let operatorTargetDay = operatorTargetHr * 8;
+
+  let userTargetHr = parseFloat(document.getElementById("userTargetHr").value) || 0;
+
+  let deviationHr = operatorTargetHr - userTargetHr;
+  let deviationDay = deviationHr * 8;
+
+  let allCycles = cycles.map(c => c.time.toFixed(2));
+
+
+  const cycleValues = cycles.map(c =>
+  Number(c.time.toFixed(2))
+);
+
+
+const rowData = {
+  "S.NO": sno,
+  "Operator Name": op["Operator Name"] || op["Operator"] || "",
+  "Token Number": op["Token Number"] || "",
+  "Operation Name": op["Operation Name"] || op["Operation"] || "",
+  "Machine": op["Machine"] || "",
+  "SAM": op["LD SAM"] || "",
+  Cycles: cycleValues,          // 🔥 ALL cycles stored here
+  NoOfCycles: cycleValues.length,
+  AvgSec: Number(avgSec.toFixed(2)),
+  BasicSAM: Number(basicSAM.toFixed(2)),
+  AllowanceSAM: Number(allowanceSAM.toFixed(2)),
+  OperatorTargetHr: Math.round(operatorTargetHr),
+  OperatorTargetDay: Math.round(operatorTargetDay),
+  UserTargetHr: userTargetHr,
+  UserTargetDay: userTargetHr * 8,
+  DeviationHr: Math.round(deviationHr),
+  DeviationDay: Math.round(deviationDay),
+  Remark: document.getElementById("remark").value || ""
+};
+
+fetch("http://127.0.0.1:5000/save", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    operator: rowData["Operator Name"],
+    operation: rowData["Operation Name"],
+    avgSec: rowData.AvgSec,
+    userTargetHr: rowData.UserTargetHr,
+    remark: rowData.Remark
+  })
+})
+.then(res => res.json())
+.then(data => console.log(data));
+
+
+
+
+
+  // 🔥 UPDATE OR INSERT (KEY FIX)
+  const existingIndex = finalData.findIndex(r => r["S.NO"] === sno);
+
+  if (existingIndex !== -1) {
+    finalData[existingIndex] = rowData;   // UPDATE SAME ROW
+  } else {
+    finalData.push(rowData);              // INSERT ONLY ONCE
+  }
+}
+
+
+/* ---------- NEXT OPERATION ---------- */
+function nextOperation() {
+
+    saveCurrentOperation();
+
+  currentIndex++;
+
+  if (currentIndex < operations.length) {
+    loadOperation();
+  } else {
+    alert("All operations completed");
+  }
+ 
+}
+
+function previousOperation() {
+
+  // 🔹 SAVE CURRENT OPERATION BEFORE GOING BACK
+  saveCurrentOperation();
+
+  if (currentIndex === 0) {
+    alert("This is the first operation");
+    return;
+  }
+
+  // Move to previous operation
+  currentIndex--;
+
+  loadOperation();
+
+  // 🔹 Restore saved data (if exists)
+  const saved = finalData.find(r => r["S.NO"] === currentIndex + 1);
+  if (!saved) return;
+
+  // Restore cycles
+  cycles = (saved.Cycles || []).map(t => ({
+  time: parseFloat(t),
+  selected: true
+}));
+
+renderCycles();
+
+
+  renderCycles();
+
+  // Restore remark
+  document.getElementById("remark").value = saved.Remark || "";
+}
+
+
+/* ---------- SKIP OPERATION ---------- */
+function skipOperation() {
+
+  const confirmSkip = confirm(
+    "Do you want to SKIP this operation?\nNo data will be saved."
+  );
+
+  if (!confirmSkip) return;
+
+  const op = operations[currentIndex];
+
+  const sno = currentIndex + 1;
+
+  const skipRow = {
+  "S.NO": sno,
+  "Operator Name": op["Operator Name"] || op["Operator"] || "",
+  "Token Number": op["Token Number"] || "",
+  "Operation Name": op["Operation Name"] || op["Operation"] || "",
+  "Machine": op["Machine"] || "",
+  "SAM": op["LD SAM"] || "",
+  C1: "SKIPPED",
+  C2: "",
+  C3: "",
+  C4: "",
+  C5: "",
+  AvgSec: "",
+  BasicSAM: "",
+  AllowanceSAM: "",
+  OperatorTargetHr: "",
+  OperatorTargetDay: "",
+  DeviationHr: "",
+  DeviationDay: "",
+  Remark: document.getElementById("remark").value || "SKIPPED"
+};
+
+
+
+
+const existingIndex = finalData.findIndex(r => r["S.NO"] === sno);
+
+if (existingIndex !== -1) {
+  finalData[existingIndex] = skipRow;
+} else {
+  finalData.push(skipRow);
+}
+
+
+  currentIndex++;
+
+  if (currentIndex < operations.length) {
+    loadOperation();
+  } else {
+    alert("All operations completed");
+  }
+}
+
+/* ===============================
+   STEP-4 : GENERATE CHARTS
+================================ */
+
+function generateCharts() {
+
+  const validData = finalData.filter(r =>
+    r.OperatorTargetHr && r.AvgSec
+  );
+
+  if (validData.length === 0) {
+    alert("No data available to generate chart");
+    return;
+  }
+
+  const labels = validData.map(r =>
+  `${r["Operation Name"]} - ${r["Operator Name"]}`
+);
+
+
+  const capacityHr = validData.map(r => Number(r.OperatorTargetHr));
+  const targetHr = Number(document.getElementById("userTargetHr").value || 0);
+  const targetDay = Number(document.getElementById("dailyTarget").value || 0);
+
+  // SAME target repeated for all operations
+  const userTargetHr = labels.map(() => targetHr);
+  const userTargetDay = labels.map(() => targetDay);
+
+  const takt = validData.map(r => Number(r.AvgSec));
+
+
+  // Destroy old charts
+  if (capacityChart) capacityChart.destroy();
+  if (taktChart) taktChart.destroy();
+
+  /* ================= CAPACITY CHART ================= */
+  capacityChart = new Chart(
+    document.getElementById("capacityChart"),
+    {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Capacity / Hr",
+            data: capacityHr,
+            backgroundColor: capacityHr.map((v, i) =>
+              v < userTargetHr[i] ? "red" : "green"
+            )
+          },
+
+          {
+  label: "User Target / Hr",
+  type: "line",
+  data: userTargetHr,
+  borderColor: "orange",
+  borderWidth: 2,
+  fill: false,
+
+  datalabels: {
+    color: "orange",
+    font: {
+      size: 14,      // 🔠 BIG TARGET LABEL
+      weight: "bold"
+    },
+    align: "top",
+    formatter: () => userTargetHr[0] + " pcs/hr"
+  }
+},
+
+
+          
+         
+          {
+            label: "User Target / Day",
+            type: "line",
+            data: userTargetDay,
+            borderColor: "blue",
+            borderWidth: 2,
+            yAxisID: "y1",
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "top" },
+
+  datalabels: {
+    color: ctx => {
+      const i = ctx.dataIndex;
+      const value = ctx.dataset.data[i];
+      const target = userTargetHr[i];
+      return value < target ? "red" : "green";
+    },
+    font: {
+      size: 11,        // 🔠 LABEL SIZE
+      weight: "bold"
+    },
+    anchor: "end",
+    align: "top",
+    formatter: v => (v > 0 ? v : "")
+  }
+},
+
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: "Per Hour" }
+          },
+          y1: {
+            beginAtZero: true,
+            position: "right",
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: "Per Day" }
+          }
+        }
+      }
+    }
+  );
+
+  /* ================= TAKT TIME CHART ================= */
+  const taktTarget = userTargetHr.map(t =>
+  t > 0 ? Number((3600 / t).toFixed(2)) : 0
+);
+
+
+
+  taktChart = new Chart(
+    document.getElementById("taktChart"),
+    {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Actual Avg Sec",
+            data: takt,
+            backgroundColor: takt.map((v, i) =>
+              v > taktTarget[i] ? "red" : "green"
+            )
+          },
+          {
+            label: "Target Takt Sec",
+            type: "line",
+            data: taktTarget,
+            borderColor: "orange",
+            borderWidth: 2,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        plugins: {
+  legend: { position: "top" },
+
+  datalabels: {
+    color: v => v > 10 ? "red" : "green",
+    font: {
+      size: 11,
+      weight: "bold"
+    },
+    anchor: "end",
+    align: "top",
+    formatter: v => v.toFixed(1) + " sec"
+  }
+},
+
+        scales: { y: { beginAtZero: true } }
+      }
+    }
+  );
+}
+
+
+
+async function exportExcel() {
+
+  saveCurrentOperation();
+  generateCharts();
+
+  // 🔥 WAIT FOR CHART TO FINISH RENDERING
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Time Study");
+
+    // 🔥 STEP-3: FIND MAX NUMBER OF CYCLES
+  const maxCycles = Math.max(
+    ...finalData.map(r => r.Cycles?.length || 0)
+  );
+  sheet.addRow(["TIME STUDY REPORT"]);
+  sheet.addRow([]);
+  sheet.addRow([
+  "STYLE", style.value,
+  "BUYER", buyer.value,
+  "LINE", line.value,
+  "DATE", date.value,
+  "USER TARGET / HR", Number(userTargetHr.value || 0),
+  "USER TARGET / DAY", Number(dailyTarget.value || 0)
+]);
+
+
+  const header = [
+  "S.NO","Operator Name","Token Number","Operation Name",
+  "Machine","SAM"
+];
+
+fetch("/save_report", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    style: document.getElementById("style").value,
+    buyer: document.getElementById("buyer").value,
+    line: document.getElementById("line").value,
+    date: document.getElementById("date").value,
+    filename: "Time_Study_Report_With_Charts.xlsx"
+  })
+});
+
+// 🔥 DYNAMIC CYCLE HEADERS
+for (let i = 1; i <= maxCycles; i++) {
+  header.push(`C${i}`);
+}
+
+header.push(
+  "Avg Sec",
+  "BasicSAM",
+  "AllowanceSAM",
+  "Capacity/Hr",
+  "Capacity/Day",
+  "Deviation/Hr",
+  "Deviation/Day",
+  "Remark"
+);
+
+
+sheet.addRow(header);
+
+finalData.forEach(r => {
+
+  const row = [
+    r["S.NO"],
+    r["Operator Name"],
+    r["Token Number"],
+    r["Operation Name"],
+    r["Machine"],
+    r["SAM"]
+  ];
+
+  // 🔥 ADD ALL CYCLES
+  for (let i = 0; i < maxCycles; i++) {
+    row.push(r.Cycles?.[i] || "");
+  }
+
+ row.push(
+  r.AvgSec,
+  r.BasicSAM,
+  r.AllowanceSAM,
+  r.OperatorTargetHr,      // ✅ Capacity / Hr
+  r.OperatorTargetDay,     // ✅ Capacity / Day
+  r.DeviationHr,
+  r.DeviationDay,
+  r.Remark
+);
+
+
+  sheet.addRow(row);
+});
+
+
+  // 🔹 NOW canvas has data
+  const capacityBase64 = getChartImage("capacityChart");
+  const taktBase64 = getChartImage("taktChart");
+
+  const capacityImg = workbook.addImage({
+    base64: capacityBase64,
+    extension: "png"
+  });
+
+  const taktImg = workbook.addImage({
+    base64: taktBase64,
+    extension: "png"
+  });
+
+  const startRow = finalData.length + 8;
+
+  sheet.addImage(capacityImg, {
+    tl: { col: 0, row: startRow },
+    ext: { width: 650, height: 320 }
+  });
+
+  sheet.addImage(taktImg, {
+    tl: { col: 0, row: startRow + 18 },
+    ext: { width: 650, height: 320 }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(new Blob([buffer]),
+    "Time_Study_Report_With_Charts.xlsx");
+}
+
+
+
+</script>
+</body>
+</html>
